@@ -59,6 +59,11 @@ socket.on('output', function(data) {
     term.io.writeUTF16(data);
 });
 
+socket.on('exit', function(redirectPath) {
+  console.log("Logout!");
+  location.href = redirectPath;
+});
+
 socket.on('disconnect', function() {
     console.log("Socket.io connection closed");
 });

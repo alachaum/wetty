@@ -15,7 +15,8 @@
         "passport": "*",
         "passport-local": "~1.0",
         "passport.socketio": "*",
-        "session-file-store": "*"
+        "session-file-store": "*",
+        "csurf": "*"
     },
     "devDependencies": {
         "load-grunt-tasks": "^3.0",

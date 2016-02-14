@@ -8,43 +8,40 @@ var passport = require('passport');
 var LocalStrategy = require('passport-local').Strategy;
 var passportSocketIo = require("passport.socketio");
 
+// Load app configuration
+var config = require('./config');
+
 //===============================================
 // Server Configuration
 //===============================================
-var opts = require('optimist')
-    .options({
-        port: {
-            demand: true,
-            alias: 'p',
-            description: 'wetty listen port'
-        },
-    }).boolean('allow_discovery').argv;
+var opts = require('optimist').options({
+  port: {
+    demand: true,
+    alias: 'p',
+    description: 'wetty listen port'
+  },
+}).boolean('allow_discovery').argv;
 
 process.on('uncaughtException', function(e) {
-    console.error('Error: ' + e);
+  console.error('Error: ' + e);
 });
 
 //===============================================
 // Passport Configuration
 //===============================================
-passport.use(new LocalStrategy(
-  function(username, password, cb) {
-    // if (username != "foo" || password != "bar") {
-    //   console.log("Failed login");
-    //   return cb(null, false, { message: 'Incorrect password.' });
-    // }
-    console.log("Successful login");
-    return cb(null, { id: username });
-  }
+passport.use(new LocalStrategy({
+    passReqToCallback: true
+  },
+  config.authFn
 ));
 
 // Configure Passport authenticated session persistence.
 passport.serializeUser(function(user, cb) {
-  cb(null, user.id);
+  cb(null, JSON.stringify(user));
 });
 
-passport.deserializeUser(function(id, cb) {
-  cb(null, { id: id });
+passport.deserializeUser(function(str, cb) {
+  cb(null, JSON.parse(str));
 });
 
 //===============================================
@@ -62,19 +59,21 @@ var FileStore = require('session-file-store')(session);
 var sessionStore = new FileStore();
 
 // Configure session middleware
-var sessionConfig = {
-  key: 'webconsole',
-  secret: '2asd7f4d6s15s74d',
+sessionConfig = {
+  key: config.session.key,
+  secret: config.session.secret,
   resave: false,
   saveUninitialized: true,
-  store: sessionStore//,
-  //cookie: { secure: true }
+  store: sessionStore
 };
 var sessionMiddleware = session(sessionConfig);
 
 // Configure cookie
 var cookieParser = require('cookie-parser');
-//var cookieMiddleware = require('cookie-parser')();
+
+// CSRF middleware
+var csrf = require('csurf');
+var csrfProtection = csrf({ cookie: true });
 
 // Use application-level middleware for common functionality, including
 // logging, parsing, and session handling.
@@ -88,18 +87,29 @@ app.use(sessionMiddleware);
 app.use(passport.initialize());
 app.use(passport.session());
 
+//===============================================
+// Express Routes
+//===============================================
 app.use('/wetty', express.static(path.join(__dirname, 'public','wetty')));
 
 app.get('/login',
+  csrfProtection,
   function(req, res){
     console.log("Rendering login");
-    res.render('login');
+    res.render('login',{ csrfToken: req.csrfToken() });
   });
 
 app.post('/login',
+  csrfProtection,
   passport.authenticate('local', { failureRedirect: '/login' }),
   function(req, res) {
     res.redirect('/');
+  });
+
+app.get('/logout',
+  function(req, res){
+    req.logout();
+    res.redirect('/login');
   });
 
 app.get('/',
@@ -141,7 +151,8 @@ io.on('connection', function(socket){
 
     // Initiate session
     var term;
-    term = pty.spawn('/bin/bash', [], {
+    var entrypoint = config.shellEntrypoint(request);
+    term = pty.spawn(entrypoint.script, entrypoint.args, {
         name: 'xterm-256color',
         cols: 80,
         rows: 30
@@ -152,7 +163,8 @@ io.on('connection', function(socket){
         socket.emit('output', data);
     });
     term.on('exit', function(code) {
-        console.log((new Date()) + " PID=" + term.pid + " ENDED")
+        console.log((new Date()) + " PID=" + term.pid + " ENDED");
+        socket.emit('exit','/logout');
     });
     socket.on('resize', function(data) {
         term.resize(data.col, data.row);
